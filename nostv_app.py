@@ -1,23 +1,24 @@
 import os
-import sys
 import threading
 import time
+import ctypes
 import webview
 import pyautogui
 
 NOME_DO_PERFIL = "MIKETV"
 
-# MAPA OFICIAL DE LINKS DIRETOS PARA EVITAR A GRELA LATERAL
-MAPA_CANAIS = {
-    "1": "https://nostv.pt",
-    "2": "https://nostv.pt",
-    "3": "https://nostv.pt",
-    "4": "https://nostv.pt-noticias"
-}
 
-NOMES_CANAIS_EXIBICAO = {
-    "1": "RTP 1", "2": "SIC", "3": "TVI", "4": "SIC NOTÍCIAS"
-}
+def impedir_suspensao():
+    """Mantém o PC e o ecrã sempre acordados enquanto a app estiver aberta."""
+    ES_CONTINUOUS = 0x80000000
+    ES_SYSTEM_REQUIRED = 0x00000001
+    ES_DISPLAY_REQUIRED = 0x00000002
+    try:
+        ctypes.windll.kernel32.SetThreadExecutionState(
+            ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED
+        )
+    except Exception as e:
+        print(f"[AVISO] Não foi possível impedir a suspensão do PC: {e}")
 
 
 def injetar_splash_gira(janela, segundos, mensagem):
@@ -111,108 +112,6 @@ def remover_splash_gira(janela):
     except Exception as e:
         logging.warning(f"Não foi possível remover a splash screen: {e}")
 
-
-
-def mapear_atalhos_teclado(janela):
-    """Parte 2 Corrigida: Simula a rota linear oficial (Aba Canais -> Clica no Canal) na troca"""
-    while True:
-        try:
-            script_teclado = """
-            (function() {
-                if (window.ultimoCodigoTecla) {
-                    var tecla = window.ultimoCodigoTecla;
-                    window.ultimoCodigoTecla = null; return tecla;
-                }
-                if (!window.tecladoConfigurado) {
-                    window.tecladoConfigurado = true;
-                    window.addEventListener('keydown', function(e) {
-                        if (['1','2','3','4', 'F11', 'Escape'].includes(e.key)) {
-                            window.ultimoCodigoTecla = e.key;
-                        }
-                    });
-                }
-                return null;
-            })();
-            """
-            tecla_carregada = janela.evaluate_js(script_teclado)
-
-            if tecla_carregada and tecla_carregada in MAPA_CANAIS:
-                nome_canal = NOMES_CANAIS_EXIBICAO.get(tecla_carregada, "Canal")
-                print(f"[BOX CONTROL] Botão {tecla_carregada} -> A iniciar rota oficial para: {nome_canal}")
-
-                # 1. REMOVE O FULLSCREEN ATUAL PARA LIBERTAR OS MENUS
-                pyautogui.press('escape')
-                time.sleep(0.4)
-
-                # 2. INJETA O SPLASH ANIMADO IMEDIATAMENTE (Cortina protetora de 20 segundos para todo o fluxo)
-                injetar_splash_gira(janela, 20,
-                                    f"A MUDAR PARA A {nome_canal.upper()}<br>Por favor, aguarde pela imagem")
-                time.sleep(0.5)
-
-                # 3. PASSO DA ABA CANAIS: Clica no menu superior para abrir a grelha
-                script_voltar_grelha = """
-                (function() {
-                    var abas = Array.from(document.querySelectorAll('a, button, span, p'));
-                    var btn = abas.find(el => el.textContent && (el.textContent.trim() === "Canais" || el.textContent.trim() === "Televisão" || el.textContent.trim() === "Guia TV" || el.textContent.trim() === "Direto"));
-                    if (btn) { btn.click(); return true; }
-                    return false;
-                })();
-                """
-                janela.evaluate_js(script_voltar_grelha)
-                print("[BACKGROUND] Aba Canais acionada. A aguardar renderização...")
-
-                # DELAY DE RENDERIZAÇÃO: Aguarda 6 segundos para a NOS desenhar a lista de canais no fundo
-                time.sleep(6)
-
-                # 4. PASSO DA ESCOLHA DO CANAL: Localiza e sintoniza o canal escolhido de forma legítima
-                canal_alvo_limpo = nome_canal.replace(" ", "")
-                script_clicar_canal_teclado = f"""
-                (function() {{
-                    var elementos = Array.from(document.querySelectorAll('p, span, img, div, h4'));
-                    var alvoCanal = elementos.find(el => {{
-                        var txt = el.textContent ? el.textContent.trim().replace(/\s+/g, "") : "";
-                        var alt = el.alt ? el.alt.trim().replace(/\s+/g, "") : "";
-                        return (/{canal_alvo_limpo}/i).test(txt) || (/{canal_alvo_limpo}/i).test(alt);
-                    }});
-                    if (alvoCanal) {{
-                        var item = alvoCanal.closest('a') || alvoCanal.closest('button') || alvoCanal.closest('[role="button"]') || alvoCanal;
-                        item.click();
-                        return true;
-                    }}
-                    return false;
-                }})();
-                """
-                janela.evaluate_js(script_clicar_canal_teclado)
-                print(f"[BACKGROUND] Clique enviado ao alvo {nome_canal}. A processar buffer de vídeo...")
-
-                # DELAY DE STREAMING: Aguarda 12 segundos para o leitor de vídeo arrancar o som e imagem
-                time.sleep(12)
-
-                # 5. REMOVE A CORTINA DO SPLASH PARA LIBERTAR A TELA
-                remover_splash_gira(janela)
-                time.sleep(0.5)
-
-                # 6. EXECUTA O CLIQUE DE REPOSIÇÃO DO FULLSCREEN NA TUA COORDENADA CALIBRADA (940, 677)
-                alvo_fs_x, alvo_y_fs = 940, 677
-                print(f"[AÇÃO TECLADO] A reativar ecrã inteiro em: X={alvo_fs_x}, Y={alvo_y_fs}")
-                pyautogui.moveTo(alvo_fs_x, alvo_y_fs, duration=0.5)
-                time.sleep(0.2)
-                pyautogui.click(alvo_fs_x, alvo_y_fs)
-                time.sleep(0.2)
-                pyautogui.click(alvo_fs_x, alvo_y_fs)
-                time.sleep(0.5)
-
-                # Força a ocultação definitiva da barra do Windows
-                pyautogui.press('f')
-                print(f"[SEQUÊNCIA] Transição para {nome_canal} concluída com sucesso!")
-
-            elif tecla_carregada in ['F11', 'Escape']:
-                janela.toggle_fullscreen()
-                time.sleep(0.5)
-        except Exception as e:
-            print(f"Aviso na linha de comandos do teclado: {e}")
-            break
-        time.sleep(0.15)
 
 
 def fluxo_linear_box(janela):
@@ -323,7 +222,9 @@ def iniciar_app():
     data_dir = os.path.join(os.path.expanduser("~"), ".nostv_app_data")
     os.makedirs(data_dir, exist_ok=True)
 
-    print("A iniciar a NOS TV Box nativa completa...")
+    impedir_suspensao()
+
+    print("A iniciar a NOS TV Box nativa completa (fixa na SIC)...")
 
     # Abre maximizado para que o ponto 940, 677 caia exatamente em cima do botão
     janela = webview.create_window(
@@ -334,7 +235,6 @@ def iniciar_app():
         text_select=False,
     )
 
-    threading.Thread(target=mapear_atalhos_teclado, args=(janela,), daemon=True).start()
     threading.Thread(target=fluxo_linear_box, args=(janela,), daemon=True).start()
 
     webview.start(private_mode=False, storage_path=data_dir)
