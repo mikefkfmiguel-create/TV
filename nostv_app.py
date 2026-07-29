@@ -107,8 +107,20 @@ def injetar_splash_gira(janela, segundos, mensagem):
 import logging
 
 def remover_splash_gira(janela):
+    """Remove imediatamente a cortina de splash, se estiver visível."""
     try:
-        janela.evaluate_js("...")
+        script_remover = """
+        (function() {
+            if (window.intervaloSplashActivo) {
+                clearInterval(window.intervaloSplashActivo);
+            }
+            var box = document.getElementById('nos-tv-box-splash');
+            if (box && box.parentNode) {
+                box.parentNode.removeChild(box);
+            }
+        })();
+        """
+        janela.evaluate_js(script_remover)
     except Exception as e:
         logging.warning(f"Não foi possível remover a splash screen: {e}")
 
@@ -188,7 +200,7 @@ def fluxo_linear_box(janela):
         print("[ROTINA] SIC selecionada.")
 
         # =========================================================================
-        # 4. BUFFER DE STREAMING E ATIVAÇÃO DO FULLSCREEN (940, 677)
+        # 4. BUFFER DE STREAMING E ATIVAÇÃO DO FULLSCREEN (sem depender de coordenadas de ecrã)
         # =========================================================================
         print("[ROTINA] 4. A carregar o sinal de vídeo da SIC...")
         time.sleep(12)  # Tempo final para o leitor de vídeo renderizar e o som assentar
@@ -197,18 +209,32 @@ def fluxo_linear_box(janela):
         remover_splash_gira(janela)
         time.sleep(0.5)
 
-        # Executa o clique mecânico na sua coordenada calibrada da janela pequena
-        alvo_x, alvo_y = 940, 677
-        print(f"[AÇÃO] A executar o clique mecânico de Fullscreen em: X={alvo_x}, Y={alvo_y}")
-
-        pyautogui.moveTo(alvo_x, alvo_y, duration=0.6)
-        time.sleep(0.2)
-        pyautogui.click(alvo_x, alvo_y)
+        # Ativa a fullscreen API diretamente no <video> (funciona em qualquer resolução de ecrã)
+        script_fullscreen_video = """
+        (function() {
+            var video = document.querySelector('video');
+            if (video && video.requestFullscreen) {
+                video.requestFullscreen();
+                return 'video-fullscreen';
+            }
+            var candidatos = Array.from(document.querySelectorAll('button, [role="button"], span, div'));
+            var botaoFs = candidatos.find(el => {
+                var label = (el.getAttribute('aria-label') || '').toLowerCase();
+                var titulo = (el.getAttribute('title') || '').toLowerCase();
+                var cls = (el.className || '').toString().toLowerCase();
+                return label.includes('fullscreen') || label.includes('ecrã inteiro') || label.includes('tela cheia')
+                    || titulo.includes('fullscreen') || titulo.includes('ecrã inteiro')
+                    || cls.includes('fullscreen') || cls.includes('full-screen');
+            });
+            if (botaoFs) { botaoFs.click(); return 'botao-fullscreen'; }
+            return 'nao-encontrado';
+        })();
+        """
+        resultado_fs = janela.evaluate_js(script_fullscreen_video)
+        print(f"[AÇÃO] Fullscreen do vídeo: {resultado_fs}")
         time.sleep(0.3)
-        pyautogui.click(alvo_x, alvo_y)
-        time.sleep(0.5)
 
-        # Força o ecrã inteiro do Windows e esconde a barra de tarefas
+        # Força o ecrã inteiro do Windows e esconde a barra de tarefas (atalho 'f', não coordenadas)
         janela.toggle_fullscreen()
         pyautogui.press('f')
         print("[ROTINA] Box TV inicializada com sucesso na SIC!")
